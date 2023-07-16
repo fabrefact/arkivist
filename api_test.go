@@ -29,6 +29,8 @@ func setupTestStore(path string) (tusd.DataStore, func()) {
 	return store, cleanupFunc
 }
 
+// "Files" uploaded by this test are actually empty;
+// unsure for now if this is a problem with the test or a problem with the code
 func TestUpload(t *testing.T) {
 	store, cleaner := setupTestStore("./test-uploads")
 	defer cleaner()
@@ -52,4 +54,27 @@ func TestUpload(t *testing.T) {
 	res.Body.Close()
 
 	assert.Equal(t, "Upload successful", string(body))
+}
+
+func TestDownload(t *testing.T) {
+	store := filestore.FileStore{
+		Path: "./testdata",
+	}
+
+	handler := getMediaFileHandler(store)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/media/testfile/", nil)
+
+	handler(w, r)
+
+	res := w.Result()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, "some test data", string(body))
 }

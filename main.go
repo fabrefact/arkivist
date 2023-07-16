@@ -18,11 +18,9 @@ func writeResponse(w http.ResponseWriter, body string) {
 	}
 }
 
-// upload a file to storage
+// uploadMediaHandler posts a file to storage
 func uploadMediaHandler(store tusd.DataStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
-		// tusd only seems to work for single file uploads, only handle one file at a time
 
 		// A storage backend for tusd may consist of multiple different parts which
 		// handle upload creation, locking, termination and so on. The composer is a
@@ -50,14 +48,33 @@ func uploadMediaHandler(store tusd.DataStore) http.HandlerFunc {
 	}
 }
 
-// retrieve a media file from storage
+// getMediaFileHandler retrieves a media file from storage
+// Eventually this will be used to request different sizes or formats but for now just pulls original file
+// tusd requires each file to have an accompanying .info file
 func getMediaFileHandler(store tusd.DataStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeResponse(w, "hi")
+
+		composer := tusd.NewStoreComposer()
+		composer.UseCore(store)
+
+		// Create a new HTTP handler for the tusd server by providing a configuration.
+		// The StoreComposer property must be set to allow the handler to function.
+		handler, err := tusd.NewUnroutedHandler(tusd.Config{
+			BasePath:              "/media/",
+			StoreComposer:         composer,
+			NotifyCompleteUploads: true,
+		})
+		if err != nil {
+			log.Fatalf("Unable to create handler: %s", err.Error())
+		}
+
+		// need to look into what this does and what is written to the response
+		handler.GetFile(w, r)
+
 	}
 }
 
-// delete a media file from storage
+// deleteMediaFileHandler deletes a media file from storage
 func deleteMediaFileHandler(store tusd.DataStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeResponse(w, "hi")
