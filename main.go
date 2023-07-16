@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tus/tusd/pkg/filestore"
 	tusd "github.com/tus/tusd/pkg/handler"
-	"github.com/tus/tusd/pkg/s3store"
 	"log"
 	"net/http"
 	"os"
@@ -23,7 +23,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Need to figure out what configurations are required for S3store
 	// probably shouldn't be created here?
-	store := s3store.S3Store{}
+	// store := s3store.S3Store{}
+
+	// to allow testing for now, lets just save to local directory
+	err := os.MkdirAll("./uploads", 0777)
+	if err != nil {
+		log.Fatalf("Error creating media directory: %s", err.Error())
+	}
+	store := filestore.FileStore{
+		Path: "./uploads",
+	}
 
 	// A storage backend for tusd may consist of multiple different parts which
 	// handle upload creation, locking, termination and so on. The composer is a
@@ -40,11 +49,10 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		NotifyCompleteUploads: true,
 	})
 	if err != nil {
-		// fix this, never panic
-		panic(fmt.Errorf("Unable to create handler: %s", err))
+		log.Fatalf("Unable to create handler: %s", err.Error())
 	}
 
-	// need to look into what this does and what needs to be written
+	// need to look into what this does and what is written to the response
 	handler.PostFile(w, r)
 
 	// Chi has a terrible return ergonomics, write a helper function for this
