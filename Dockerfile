@@ -2,7 +2,9 @@ FROM jenkins/jenkins:lts
 
 USER root
 
-RUN apt-get update && apt-get install golang-go -y && apt-get clean
+RUN apt-get update \
+    && apt-get install golang-go -y \
+    && apt-get clean
 
 USER jenkins
 
