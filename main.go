@@ -18,66 +18,25 @@ func writeResponse(w http.ResponseWriter, body string) {
 	}
 }
 
-// uploadMediaHandler posts a file to storage
-func uploadMediaHandler(store tusd.DataStore) http.HandlerFunc {
+// uploadMediaHandler uploads a file to storage
+// tusd requires client to implement the tus resumable upload protocol https://tus.io/protocols/resumable-upload
+// if want to support non-tus uploads (ie multipart/form-data) will have to add logic to this function
+func uploadMediaHandler(tusdFunc http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		// A storage backend for tusd may consist of multiple different parts which
-		// handle upload creation, locking, termination and so on. The composer is a
-		// place where all those separated pieces are joined together. In this example
-		// we only use the file store but you may plug in multiple.
-		composer := tusd.NewStoreComposer()
-		composer.UseCore(store)
+		tusdFunc(w, r)
 
-		// Create a new HTTP handler for the tusd server by providing a configuration.
-		// The StoreComposer property must be set to allow the handler to function.
-		handler, err := tusd.NewUnroutedHandler(tusd.Config{
-			BasePath:              "/media/",
-			StoreComposer:         composer,
-			NotifyCompleteUploads: true,
-		})
-		if err != nil {
-			log.Fatalf("Unable to create handler: %s", err.Error())
-		}
-
-		// need to look into what this does and what is written to the response
-		handler.PostFile(w, r)
-
-		// probably don't need to return a response body at all but for now it's useful
+		// don't need to return a response body at all but for now it's useful
 		writeResponse(w, "Upload successful")
 	}
 }
 
 // getMediaFileHandler retrieves a media file from storage
-// Eventually this will be used to request different sizes or formats but for now just pulls original file
-// tusd requires each file to have an accompanying .info file
-func getMediaFileHandler(store tusd.DataStore) http.HandlerFunc {
+// Eventually this will be used to request different sizes or formats but for now just pulls original file using tusd
+func getMediaFileHandler(tusdFunc http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
-		composer := tusd.NewStoreComposer()
-		composer.UseCore(store)
-
-		// Create a new HTTP handler for the tusd server by providing a configuration.
-		// The StoreComposer property must be set to allow the handler to function.
-		handler, err := tusd.NewUnroutedHandler(tusd.Config{
-			BasePath:              "/media/",
-			StoreComposer:         composer,
-			NotifyCompleteUploads: true,
-		})
-		if err != nil {
-			log.Fatalf("Unable to create handler: %s", err.Error())
-		}
-
-		// need to look into what this does and what is written to the response
-		handler.GetFile(w, r)
-
-	}
-}
-
-// deleteMediaFileHandler deletes a media file from storage
-func deleteMediaFileHandler(store tusd.DataStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeResponse(w, "hi")
+		// add logic to resize images
+		tusdFunc(w, r)
 	}
 }
 
@@ -89,12 +48,27 @@ func createRouter(store tusd.DataStore) http.Handler {
 	// look into other useful middleware
 	r.Use(middleware.Logger)
 
+	composer := tusd.NewStoreComposer()
+	composer.UseCore(store)
+
+	// Create a new HTTP handler for the tusd server by providing a configuration.
+	// The StoreComposer property must be set to allow the handler to function.
+	handler, err := tusd.NewUnroutedHandler(tusd.Config{
+		BasePath:      "/media/",
+		StoreComposer: composer,
+	})
+	if err != nil {
+		log.Fatalf("Unable to create handler: %s", err.Error())
+	}
+
 	// handle media routes
 	r.Route("/media", func(r chi.Router) {
-		r.Post("/", uploadMediaHandler(store))
+		r.Post("/", uploadMediaHandler(handler.PostFile))
 		r.Route("/{mediaId}", func(r chi.Router) {
-			r.Get("/", getMediaFileHandler(store))
-			r.Delete("/", deleteMediaFileHandler(store))
+			r.Get("/", getMediaFileHandler(handler.GetFile))
+			r.Delete("/", handler.DelFile)
+			r.Head("/", handler.HeadFile)
+			r.Patch("/", handler.PatchFile)
 		})
 	})
 
