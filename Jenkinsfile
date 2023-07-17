@@ -12,7 +12,7 @@ pipeline {
         sh 'go install github.com/jstemmer/go-junit-report'
         sh 'go test -covermode=atomic -coverprofile=coverage.out'
         sh 'go env'
-        sh 'go-junit-report'
+        sh 'echo $PATH && which go-junit-report'
       }
     }
   }
