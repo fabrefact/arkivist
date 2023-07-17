@@ -8,17 +8,17 @@ pipeline {
     }
     stage('Test') {
       steps {
-        sh 'export PATH=$PATH:$(go env GOPATH)/bin'
-        sh 'go install github.com/jstemmer/go-junit-report'
-        sh 'go test -covermode=atomic -coverprofile=coverage.out'
-        sh 'go env'
-        sh 'echo $PATH && which go-junit-report'
+        sh '''
+          export PATH=$PATH:$(go env GOPATH)/bin
+          go install github.com/jstemmer/go-junit-report
+          go test -v 2>&1 ./... | go-junit-report -set-exit-code > report.xml
+        '''
       }
     }
   }
-  // post {
-  //  always {
-  //    junit 'report.xml'
-  //  }
-  //}
+  post {
+    always {
+      junit 'report.xml'
+    }
+  }
 }
