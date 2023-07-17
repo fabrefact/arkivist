@@ -10,24 +10,13 @@ import (
 	"os"
 )
 
-// writeResponse abstracts away writing response bodies entirely because I don't like the syntax
-func writeResponse(w http.ResponseWriter, body string) {
-	_, err := w.Write([]byte(body))
-	if err != nil {
-		log.Printf("Error writing response: %v", err)
-	}
-}
-
 // uploadMediaHandler uploads a file to storage
 // tusd requires client to implement the tus resumable upload protocol https://tus.io/protocols/resumable-upload
 // if want to support non-tus uploads (ie multipart/form-data) will have to add logic to this function
 func uploadMediaHandler(tusdFunc http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		// support non-tus uploads?
 		tusdFunc(w, r)
-
-		// don't need to return a response body at all but for now it's useful
-		writeResponse(w, "Upload successful")
 	}
 }
 
@@ -52,17 +41,20 @@ func createRouter(store tusd.DataStore) http.Handler {
 	composer.UseCore(store)
 
 	// Create a new HTTP handler for the tusd server by providing a configuration.
+	// Using UnroutedHandler so API can contain additional routes not supported by tusd
 	// The StoreComposer property must be set to allow the handler to function.
 	handler, err := tusd.NewUnroutedHandler(tusd.Config{
 		BasePath:      "/media/",
 		StoreComposer: composer,
 	})
 	if err != nil {
-		log.Fatalf("Unable to create handler: %s", err.Error())
+		log.Fatalf("Unable to create tusd handler: %s", err.Error())
 	}
 
 	// handle media routes
 	r.Route("/media", func(r chi.Router) {
+		// use default tusd middleware to enforce tusd spec and handle OPTIONS
+		r.Use(handler.Middleware)
 		r.Post("/", uploadMediaHandler(handler.PostFile))
 		r.Route("/{mediaId}", func(r chi.Router) {
 			r.Get("/", getMediaFileHandler(handler.GetFile))
