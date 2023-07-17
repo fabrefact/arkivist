@@ -8,6 +8,7 @@ pipeline {
     }
     stage('Test') {
       steps {
+        sh 'export PATH=$PATH:$(go env GOPATH)/bin'
         sh 'go install github.com/jstemmer/go-junit-report'
         sh 'go test -covermode=atomic -coverprofile=coverage.out'
         sh 'go env'
