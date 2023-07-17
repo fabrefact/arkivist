@@ -1,3 +1,5 @@
+# Specify amd64, since arm64 is the default on our macs and
+# it gets weird from a go binary perspective real quick
 FROM --platform=linux/amd64 jenkins/jenkins:lts
 
 # Change to the root user to be able to install golang properly
