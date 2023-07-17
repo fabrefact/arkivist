@@ -32,17 +32,35 @@ func setupTestStore(path string) (tusd.DataStore, func()) {
 func TestUpload(t *testing.T) {
 	store, cleaner := setupTestStore("./test-uploads")
 	defer cleaner()
-	handler := uploadMediaHandler(store)
+
+	router := createRouter(store)
 
 	w := httptest.NewRecorder()
 
 	file := "some file contents"
 	reader := strings.NewReader(file)
 	r := httptest.NewRequest("POST", "/media/", reader)
-	// required header for streaming uploads to work properly
+	// required headers for resumable uploads to work properly
 	r.Header.Add("Upload-Length", strconv.Itoa(len(file)))
+	r.Header.Add("Content-Type", "application/offset+octet-stream")
+	r.Header.Add("Tus-Resumable", "1.0.0")
 
-	handler(w, r)
+	router.ServeHTTP(w, r)
+
+	assert.Equal(t, 201, w.Result().StatusCode)
+}
+
+func TestDownload(t *testing.T) {
+	store := filestore.FileStore{
+		Path: "./testdata",
+	}
+
+	router := createRouter(store)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/media/testfile/", nil)
+
+	router.ServeHTTP(w, r)
 
 	res := w.Result()
 	body, err := io.ReadAll(res.Body)
@@ -51,5 +69,6 @@ func TestUpload(t *testing.T) {
 	}
 	res.Body.Close()
 
-	assert.Equal(t, "Upload successful", string(body))
+	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, "some test data", string(body))
 }
