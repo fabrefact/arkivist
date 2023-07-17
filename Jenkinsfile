@@ -8,7 +8,7 @@ pipeline {
     }
     stage('Test') {
       steps {
-        sh 'go get https://github.com/jstemmer/go-junit-report'
+        sh 'go get -u github.com/jstemmer/go-junit-report'
         sh 'go test -covermode=atomic -coverprofile=coverage.out'
         sh 'go-junit-report'
       }
