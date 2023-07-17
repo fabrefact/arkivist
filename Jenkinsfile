@@ -8,15 +8,15 @@ pipeline {
     }
     stage('Test') {
       steps {
-        sh 'go get -u github.com/jstemmer/go-junit-report'
+        sh 'go install github.com/jstemmer/go-junit-report'
         sh 'go test -covermode=atomic -coverprofile=coverage.out'
         sh 'go-junit-report'
       }
     }
   }
-  post {
-    always {
-      junit 'report.xml'
-    }
-  }
+  // post {
+  //  always {
+  //    junit 'report.xml'
+  //  }
+  //}
 }
