@@ -5,6 +5,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tus/tusd/pkg/filestore"
 	tusd "github.com/tus/tusd/pkg/handler"
+	"golang.org/x/net/context"
 	"log"
 	"net/http"
 	"os"
@@ -13,11 +14,74 @@ import (
 // uploadMediaHandler uploads a file to storage
 // tusd requires client to implement the tus resumable upload protocol https://tus.io/protocols/resumable-upload
 // if want to support non-tus uploads (ie multipart/form-data) will have to add logic to this function
-func uploadMediaHandler(tusdFunc http.HandlerFunc) http.HandlerFunc {
+func uploadMediaHandler(composer *tusd.StoreComposer, tusdFunc http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// support non-tus uploads?
+		log.Print(r.Header.Get("Content-Type"))
+
+		if r.Header.Get("Content-Type") != "application/offset+octet-stream" {
+			handleMultiPartFormUpload(composer, w, r)
+			log.Printf("sent multipart form")
+			return
+		}
+
 		tusdFunc(w, r)
 	}
+}
+
+// janky implementation to support regular multipart form uploads. Technically *works* but seems sus
+func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWriter, r *http.Request) {
+	// 32 MB is the default used by FormFile() and the example I found on the internet
+	// Request body up to this much will be read into memory, the rest into temporary files on disk
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get a reference to the fileHeaders.
+	// They are accessible only after ParseMultipartForm is called
+	files := r.MultipartForm.File["file"]
+
+	for _, fileHeader := range files {
+
+		// Open each file
+		file, err := fileHeader.Open()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// this isn't great for memory management, but every example does this
+		defer file.Close()
+
+		ctx := context.Background()
+
+		// faking out tusd to store file
+		info := tusd.FileInfo{
+			Size:    fileHeader.Size,
+			IsFinal: true,
+		}
+
+		upload, err := composer.Core.NewUpload(ctx, info)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		bytesWritten, err := upload.WriteChunk(ctx, 0, file)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Wrote %d bytes", bytesWritten)
+
+		if err := upload.FinishUpload(ctx); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+	}
+	// the problem with this is not sending back any of the filenames of the created files
+	w.WriteHeader(http.StatusCreated)
 }
 
 // getMediaFileHandler retrieves a media file from storage
@@ -50,12 +114,14 @@ func createRouter(store tusd.DataStore) http.Handler {
 	if err != nil {
 		log.Fatalf("Unable to create tusd handler: %s", err.Error())
 	}
+	log.Print("testing")
 
 	// handle media routes
 	r.Route("/media", func(r chi.Router) {
 		// use default tusd middleware to enforce tusd spec and handle OPTIONS
+		r.Use(TempMiddleware)
 		r.Use(handler.Middleware)
-		r.Post("/", uploadMediaHandler(handler.PostFile))
+		r.Post("/", uploadMediaHandler(composer, handler.PostFile))
 		r.Route("/{mediaId}", func(r chi.Router) {
 			r.Get("/", getMediaFileHandler(handler.GetFile))
 			r.Delete("/", handler.DelFile)
@@ -65,6 +131,16 @@ func createRouter(store tusd.DataStore) http.Handler {
 	})
 
 	return r
+}
+
+func TempMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// fake out this header so I can test until I decide how to properly handle this
+		r.Header.Set("Tus-Resumable", "1.0.0")
+
+		// Proceed with routing the request
+		h.ServeHTTP(w, r)
+	})
 }
 
 func main() {

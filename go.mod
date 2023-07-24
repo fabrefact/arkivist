@@ -6,6 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.10
 	github.com/stretchr/testify v1.8.2
 	github.com/tus/tusd v1.11.0
+	golang.org/x/net v0.8.0
 )
 
 require (
