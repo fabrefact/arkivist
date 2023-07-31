@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	reExtractFileID  = regexp.MustCompile(`([^/]+)\/?$`)
+	reExtractFileID  = regexp.MustCompile(`([^/]+)/?$`)
 	reForwardedHost  = regexp.MustCompile(`host="?([^;"]+)`)
 	reForwardedProto = regexp.MustCompile(`proto=(https?)`)
 )
@@ -74,7 +74,10 @@ func uploadMediaHandler(composer *tusd.StoreComposer, tusdFunc http.HandlerFunc)
 	}
 }
 
-// janky implementation to support regular multipart form uploads. Technically *works* but seems sus
+// handleMultiPartFormUpload parses multipart/form-data content and attempts to save each file
+// using the configured tusd backend.
+//
+// janky implementation based on generic upload-handling tutorials. Technically *works* but seems sus
 func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWriter, r *http.Request) {
 	// 32 MB is the default used by FormFile() and the example I found on the internet
 	// Request body up to this much will be read into memory, the rest into temporary files on disk
@@ -103,10 +106,19 @@ func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWrit
 
 		ctx := context.Background()
 
+		// set metadata from any headers included in form-data subpart
+		meta := make(map[string]string)
+
+		contentType := fileHeader.Header.Get("Content-Type")
+		if contentType != "" {
+			meta["filetype"] = contentType
+		}
+
 		// faking out tusd to store file
 		info := tusd.FileInfo{
-			Size:    fileHeader.Size,
-			IsFinal: true,
+			Size:     fileHeader.Size,
+			IsFinal:  true,
+			MetaData: meta,
 		}
 
 		// create the file
