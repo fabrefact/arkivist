@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+    title: Arkivist
+    version: 0.1.0
+    description: This is an API for storing and managing a media library in cloud storage
+servers:
+    - url: http://localhost:3000
+tags:
+    - name: media
+      description: Operations about media files
+paths:
+    /media:
+        summary: Operations on media files
+        post:
+            tags:
+                - media
+            summary: Upload a new media file to the storage service
+            description: ''
+            operationId: uploadMedia
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            properties:
+                                file:
+                                    type: array
+                                    items:
+                                        type: string
+                                        format: binary
+                    application/offset+octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            responses:
+                '201':
+                    description: File created
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/MediaLink'
+                default:
+                    description: Default error sample response
+    /media/{mediaId}:
+        summary: Operations on a single media file
+        parameters:
+            - name: mediaId
+              in: path
+              description: The id of the media file
+              required: true
+              schema:
+                  type: string
+        get:
+            tags:
+                - media
+            summary: Get media by ID
+            description: ''
+            operationId: ''
+            responses:
+                '200':
+                    description: OK
+                '404':
+                    description: Upload not found
+                default:
+                    description: Default error sample response
+        patch:
+            tags:
+                - media
+            summary: Continue a resumable upload the specified file
+            description: ''
+            operationId: ''
+            responses:
+                default:
+                    description: Default error sample response
+        delete:
+            tags:
+                - media
+            summary: Delete media file by ID
+            description: ''
+            operationId: ''
+            responses:
+                default:
+                    description: Default error sample response
+components:
+    schemas:
+        MediaLink:
+            type: object
+            properties:
+                id:
+                    type: string
+                    example: 69f7443c8a04543a5a78183547a43804
+                filename:
+                    type: string
+                    example: image.png
+                url:
+                    type: string
+                    example: http://localhost:3000/media/69f7443c8a04543a5a78183547a43804
