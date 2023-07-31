@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tus/tusd/pkg/filestore"
@@ -9,14 +10,28 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 )
 
+var (
+	reExtractFileID  = regexp.MustCompile(`([^/]+)\/?$`)
+	reForwardedHost  = regexp.MustCompile(`host="?([^;"]+)`)
+	reForwardedProto = regexp.MustCompile(`proto=(https?)`)
+)
+
+// MediaLink contains retrieval information for a given media file
+type MediaLink struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	URL      string `json:"url"`
+}
+
 // uploadMediaHandler uploads a file to storage
-// tusd requires client to implement the tus resumable upload protocol https://tus.io/protocols/resumable-upload
-// if want to support non-tus uploads (ie multipart/form-data) will have to add logic to this function
+//
+// using application/offset+octet-stream requires client to implement the tus resumable upload protocol https://tus.io/protocols/resumable-upload
+// otherwise multipart/form-data is assumed
 func uploadMediaHandler(composer *tusd.StoreComposer, tusdFunc http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// support non-tus uploads?
 		log.Print(r.Header.Get("Content-Type"))
 
 		if r.Header.Get("Content-Type") != "application/offset+octet-stream" {
@@ -26,6 +41,36 @@ func uploadMediaHandler(composer *tusd.StoreComposer, tusdFunc http.HandlerFunc)
 		}
 
 		tusdFunc(w, r)
+
+		// return file ID in body and not just location header
+		// custom tus client can use this body for functions outside tus spec
+		location := w.Header().Get("Location")
+		if location != "" {
+			// TODO: get provided file name for tus uploads. From metadata?
+
+			// ID can be extracted from URL
+			var id string
+			if re := reExtractFileID.FindStringSubmatch(location); len(re) == 2 {
+				id = re[1]
+			}
+
+			link := MediaLink{
+				ID:  id,
+				URL: location,
+			}
+
+			// even though there will only ever be one link, make array for consistency across upload types
+			var resp []MediaLink
+			resp = append(resp, link)
+
+			w.Header().Set("Content-Type", "application/json")
+
+			err := json.NewEncoder(w).Encode(resp)
+			if err != nil {
+				// log error I guess
+				return
+			}
+		}
 	}
 }
 
@@ -41,6 +86,9 @@ func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWrit
 	// Get a reference to the fileHeaders.
 	// They are accessible only after ParseMultipartForm is called
 	files := r.MultipartForm.File["file"]
+
+	// Response body contains information on each uploaded file
+	var resp []MediaLink
 
 	for _, fileHeader := range files {
 
@@ -61,12 +109,14 @@ func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWrit
 			IsFinal: true,
 		}
 
+		// create the file
 		upload, err := composer.Core.NewUpload(ctx, info)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		// actually write the file contents
 		bytesWritten, err := upload.WriteChunk(ctx, 0, file)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -79,9 +129,85 @@ func handleMultiPartFormUpload(composer *tusd.StoreComposer, w http.ResponseWrit
 			return
 		}
 
+		// on successful file upload, generate media information for response
+		info, err = upload.GetInfo(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		id := info.ID
+		url := absFileURL(r, id)
+
+		link := MediaLink{
+			ID:       id,
+			Filename: fileHeader.Filename,
+			URL:      url,
+		}
+		resp = append(resp, link)
 	}
-	// the problem with this is not sending back any of the filenames of the created files
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+
+	err := json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		// log error I guess
+		return
+	}
+}
+
+// Make an absolute URLs to the given upload id.
+// Uses host and protocol from the request to build
+//
+// Modified from tusd unrouted_handler.go
+func absFileURL(r *http.Request, id string) string {
+
+	// Read origin and protocol from request
+	host, proto := getHostAndProtocol(r, true)
+
+	url := proto + "://" + host + r.URL.Path + id
+
+	return url
+}
+
+// getHostAndProtocol extracts the host and used protocol (either HTTP or HTTPS)
+// from the given request. If `allowForwarded` is set, the X-Forwarded-Host,
+// X-Forwarded-Proto and Forwarded headers will also be checked to
+// support proxies.
+// Copied from tusd unrouted_handler.go
+func getHostAndProtocol(r *http.Request, allowForwarded bool) (host, proto string) {
+	if r.TLS != nil {
+		proto = "https"
+	} else {
+		proto = "http"
+	}
+
+	host = r.Host
+
+	if !allowForwarded {
+		return
+	}
+
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+
+	if h := r.Header.Get("X-Forwarded-Proto"); h == "http" || h == "https" {
+		proto = h
+	}
+
+	if h := r.Header.Get("Forwarded"); h != "" {
+		if re := reForwardedHost.FindStringSubmatch(h); len(re) == 2 {
+			host = re[1]
+		}
+
+		if re := reForwardedProto.FindStringSubmatch(h); len(re) == 2 {
+			proto = re[1]
+		}
+	}
+
+	return
 }
 
 // getMediaFileHandler retrieves a media file from storage
