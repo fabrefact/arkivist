@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"github.com/stretchr/testify/assert"
 	"github.com/tus/tusd/pkg/filestore"
 	tusd "github.com/tus/tusd/pkg/handler"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"strconv"
 	"strings"
@@ -29,7 +32,7 @@ func setupTestStore(path string) (tusd.DataStore, func()) {
 	return store, cleanupFunc
 }
 
-func TestUpload(t *testing.T) {
+func TestTusUpload(t *testing.T) {
 	store, cleaner := setupTestStore("./test-uploads")
 	defer cleaner()
 
@@ -47,7 +50,57 @@ func TestUpload(t *testing.T) {
 
 	router.ServeHTTP(w, r)
 
-	assert.Equal(t, 201, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal()
+	}
+
+	assert.Equal(t, 201, res.StatusCode)
+	// ideally want to assert something meaningful about the response, but ID/URL are random so can't naively compare
+	assert.NotNil(t, body)
+}
+
+func TestMultipartUpload(t *testing.T) {
+	store, cleaner := setupTestStore("./test-uploads")
+	defer cleaner()
+
+	router := createRouter(store)
+
+	w := httptest.NewRecorder()
+
+	file := "some file contents"
+
+	var b bytes.Buffer
+	wr := multipart.NewWriter(&b)
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition",
+		`form-data; name="file"; filename="random.txt"`)
+	h.Set("Content-Type", "text/plain")
+	fw, err := wr.CreatePart(h)
+	fw.Write([]byte(file))
+	wr.Close()
+
+	r := httptest.NewRequest("POST", "/media/", &b)
+	// expected headers for multipart/form-data upload
+	r.Header.Add("Content-Type", wr.FormDataContentType())
+
+	router.ServeHTTP(w, r)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal()
+	}
+
+	assert.Equal(t, 201, res.StatusCode)
+	// ideally want to assert something meaningful about the response, but ID/URL are random so can't naively compare
+	assert.NotNil(t, body)
 }
 
 func TestDownload(t *testing.T) {
@@ -63,11 +116,11 @@ func TestDownload(t *testing.T) {
 	router.ServeHTTP(w, r)
 
 	res := w.Result()
+	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
 
 	assert.Equal(t, 200, res.StatusCode)
 	assert.Equal(t, "some test data", string(body))
